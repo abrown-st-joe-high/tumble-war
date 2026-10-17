@@ -19,11 +19,19 @@ small{color:#89a}
 table{width:100%;border-collapse:collapse}td{padding:3px 4px}
 td button{margin:0;padding:5px}
 .desc{min-height:2.6em;font-size:13px;color:#9bd}
+.hide2{display:none}
+label{cursor:pointer}
 </style></head><body>
 <canvas id="c"></canvas>
 
 <div class="ov" id="menu"><div class="panel">
-<h1>HOVER DUEL</h1><small>Training mode &mdash; two players, one field. First to 3 round wins.</small>
+<h1>HOVER DUEL</h1><small>Two players, one field. Training: first to 3 round wins. Co-op: clear each level together.</small>
+<h3>Mode</h3><select id="mode"><option value="pvp">Training - players battle each other</option><option value="coop">Co-op - team up against enemies, level by level</option></select>
+<div id="coopopts" class="hide2"><small>Objectives each level (pick any, separately or together):</small><br>
+<label><input type="checkbox" id="ob_blocks"> Destroy static targets</label><br>
+<label><input type="checkbox" id="ob_drones"> Destroy chasing drones</label><br>
+<label><input type="checkbox" id="ob_shooters"> Destroy shooting drones</label><br>
+<label><input type="checkbox" id="ob_items"> Collect items</label></div>
 <h3>Choose secondary weapon</h3>
 <div class="row">
 <div><b class="p1">Player 1</b><select id="w0"></select><div class="desc" id="d0"></div></div>
@@ -39,7 +47,7 @@ td button{margin:0;padding:5px}
 <h1>OPTIONS</h1><small>Click a key, then press the new key. Esc cancels.</small>
 <div class="row"><div><h3 class="p1">Player 1</h3><table id="t0"></table></div>
 <div><h3 class="p2">Player 2</h3><table id="t1"></table></div></div>
-<h3>Gameplay</h3><label><input type="checkbox" id="over"> Secondary shots fly over obstacles</label><br><small>Off = every secondary shot (lock missiles and the laser too) is stopped by obstacles. Only matters on the Arena map.</small>
+<h3>Gameplay</h3><label><input type="checkbox" id="over"> Secondary shots fly over obstacles</label><br><small>Off = every secondary shot (lock missiles and the laser too) is stopped by obstacles. Only matters on the Arena map.</small><br><label><input type="checkbox" id="ff"> Friendly fire in co-op (your shots can hurt your partner)</label>
 <button id="reset">Reset to defaults</button>
 <button class="go" id="back">Back</button>
 </div></div>
@@ -97,6 +105,15 @@ $('map').value=mapSel;
 $('map').onchange=()=>{mapSel=$('map').value;try{localStorage.setItem('hoverMap',mapSel)}catch(e){}};
 $('over').checked=over;
 $('over').onchange=()=>{over=$('over').checked;try{localStorage.setItem('hoverOver',over?'1':'0')}catch(e){}};
+let gm='pvp',ob={blocks:1,drones:1,shooters:1,items:1},ff=false;
+try{gm=localStorage.getItem('hoverMode')||'pvp';ff=localStorage.getItem('hoverFF')==='1';const o=JSON.parse(localStorage.getItem('hoverOb')||'null');if(o)ob=o}catch(e){}
+if(gm!=='coop')gm='pvp';
+const OBK=['blocks','drones','shooters','items'];
+function syncMode(){$('coopopts').classList.toggle('hide2',gm!=='coop');$('start').textContent=gm==='coop'?'Start Co-op':'Start Training'}
+$('mode').value=gm;$('mode').onchange=()=>{gm=$('mode').value;try{localStorage.setItem('hoverMode',gm)}catch(e){}syncMode()};
+OBK.forEach(k=>{const c=$('ob_'+k);c.checked=!!ob[k];c.onchange=()=>{ob[k]=c.checked?1:0;try{localStorage.setItem('hoverOb',JSON.stringify(ob))}catch(e){}}});
+$('ff').checked=ff;$('ff').onchange=()=>{ff=$('ff').checked;try{localStorage.setItem('hoverFF',ff?'1':'0')}catch(e){}};
+syncMode();
 hint();
 
 /* ---------- input ---------- */
@@ -114,10 +131,10 @@ addEventListener('keyup',e=>{keys[e.code]=0});
 addEventListener('blur',()=>{for(const k in keys)keys[k]=0});
 
 /* ---------- state ---------- */
-let obs=[],mapMode='box',state='menu',paused=false,ships=[],proj=[],parts=[],wins=[0,0],msg='',msgT=0,roundEnd=0;
-function mkShip(i){return{i,x:i?W-180:180,y:H/2,vx:0,vy:0,a:i?Math.PI:0,w:0,hp:100,c:100,oh:0,pcd:0,sec:SEL[i],sc:0,lockT:0,las:0,ch:0,prev:0,thr:0,flash:0,dead:0}}
-function newMatch(){wins=[0,0];obs=MAPS[mapSel].obs;mapMode=MAPS[mapSel].mode;startRound();state='play';paused=false}
-function startRound(){cam.init=0;ships=[mkShip(0),mkShip(1)];proj=[];parts=[];roundEnd=0;msg='';msgT=0}
+let enemies=[],items=[],lvl=1,coopOver=0,levelDone=0,obs=[],mapMode='box',state='menu',paused=false,ships=[],proj=[],parts=[],wins=[0,0],msg='',msgT=0,roundEnd=0;
+function mkShip(i){return{lt:null,rt:0,i,x:i?W-180:180,y:H/2,vx:0,vy:0,a:i?Math.PI:0,w:0,hp:100,c:100,oh:0,pcd:0,sec:SEL[i],sc:0,lockT:0,las:0,ch:0,prev:0,thr:0,flash:0,dead:0}}
+function newMatch(){wins=[0,0];lvl=1;coopOver=0;levelDone=0;if(gm==='coop'&&!OBK.some(k=>ob[k])){ob.blocks=1;$('ob_blocks').checked=true}obs=MAPS[mapSel].obs;mapMode=MAPS[mapSel].mode;startRound();state='play';paused=false}
+function startRound(){cam.init=0;ships=[mkShip(0),mkShip(1)];proj=[];parts=[];roundEnd=0;msg='';msgT=0;enemies=[];items=[];if(gm==='coop')spawnLevel()}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const angd=(a,b)=>{let d=b-a;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d};
 const wrapd=(d,L)=>mapMode==='wrap'?((d+L/2)%L+L)%L-L/2:d;
@@ -134,32 +151,85 @@ function P(o,x,y,a,sp,dmg,r,life,type,extra){
  const p={x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,a,sp,dmg,r,life,t:0,type,o:o.i,col:COL[o.i]};
  if(extra)Object.assign(p,extra);proj.push(p);return p}
 function boom(x,y,col,n=12,sp=200){for(let i=0;i<n;i++){const a=Math.random()*6.28,s=Math.random()*sp;parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.4,col})}}
-function hurt(s,d){if(s.dead)return;s.hp-=d;s.flash=.08;if(s.hp<=0){s.hp=0;s.dead=1;boom(s.x,s.y,'#fff',50,400);boom(s.x,s.y,COL[s.i],40,300);if(!roundEnd){const w=1-s.i;wins[w]++;roundEnd=2.4;msg=wins[w]>=3?`PLAYER ${w+1} WINS THE MATCH!`:`Player ${w+1} wins the round`;msgT=1}}}
+function hurt(s,d){if(s.dead)return;s.hp-=d;s.flash=.08;if(s.hp<=0){s.hp=0;s.dead=1;boom(s.x,s.y,'#fff',50,400);boom(s.x,s.y,COL[s.i],40,300);if(gm==='coop'){s.rt=6;if(ships.every(q=>q.dead)&&!coopOver){coopOver=1;roundEnd=3;msg='GAME OVER - reached level '+lvl}}else if(!roundEnd){const w=1-s.i;wins[w]++;roundEnd=2.4;msg=wins[w]>=3?`PLAYER ${w+1} WINS THE MATCH!`:`Player ${w+1} wins the round`;msgT=1}}}
 
 /* ---------- simulation ---------- */
+function respawn(s){const o=ships[1-s.i];s.dead=0;s.hp=60;s.c=100;s.oh=0;s.sc=0;s.las=0;s.ch=0;s.vx=0;s.vy=0;s.w=0;s.lockT=0;s.lt=null;s.flash=0;
+ if(!o.dead){s.x=o.x-60;s.y=o.y}else{s.x=s.i?W-180:180;s.y=H/2}}
+function spawnLevel(){
+ enemies=[];items=[];proj=proj.filter(p=>p.o!==2);
+ const L=lvl,rp=()=>{for(let t=0;t<80;t++){const x=100+Math.random()*(W-200),y=100+Math.random()*(H-200);
+  if(obs.some(o=>x>o.x-50&&x<o.x+o.w+50&&y>o.y-50&&y<o.y+o.h+50))continue;
+  if(ships.some(q=>!q.dead&&Math.hypot(q.x-x,q.y-y)<420))continue;return[x,y]}return[W/2,100+Math.random()*(H-200)]};
+ const add=(kind,n,hp,r)=>{for(let i=0;i<n;i++){const[x,y]=rp();enemies.push({kind,x,y,vx:0,vy:0,hp,mhp:hp,r,a:Math.random()*6,cd:1.5+Math.random(),flash:0,dir:Math.random()<.5?1:-1,dead:0})}};
+ if(ob.blocks)add('block',3+L,40,26);
+ if(ob.drones)add('drone',Math.min(3+2*L,18),9+2*L,13);
+ if(ob.shooters)add('shooter',Math.min(1+L,8),20+2*L,17);
+ if(ob.items)for(let i=0;i<Math.min(4+L,14);i++){const[x,y]=rp();items.push({x,y,got:0})}
+}
+function nextLevel(){lvl++;levelDone=0;for(const s of ships){if(s.dead)respawn(s);s.hp=Math.min(100,s.hp+40)}spawnLevel()}
+function hurtE(e,d){if(e.dead)return;e.hp-=d;e.flash=.08;if(e.hp<=0){e.dead=1;const c=e.kind==='block'?'#8cf':'#f64';boom(e.x,e.y,c,e.kind==='block'?30:18,260)}}
+function dmg(e,d){if(e.kind)hurtE(e,d);else hurt(e,d)}
+const foes=o=>gm==='coop'?enemies.filter(e=>!e.dead):(ships[1-o].dead?[]:[ships[1-o]]);
+const targets=o=>o===2?ships.filter(q=>!q.dead):(gm==='coop'&&ff?foes(o).concat(ships[1-o].dead?[]:[ships[1-o]]):foes(o));
+function nearest(o,x,y){let b=null,bd=1e9;for(const e of foes(o)){const[dx,dy]=del({x,y},e),dd=Math.hypot(dx,dy);if(dd<bd){bd=dd;b=e}}return b}
+function stepEnemies(dt){
+ const al=ships.filter(q=>!q.dead);
+ for(const e of enemies){
+  if(e.dead)continue;
+  e.flash=Math.max(0,e.flash-dt);e.cd-=dt;e.a+=dt*(e.kind==='block'?.4:2);
+  if(e.kind==='block')continue;
+  let t=null,td=1e9;
+  for(const q of al){const[dx,dy]=del(e,q),dd=Math.hypot(dx,dy);if(dd<td){td=dd;t=q}}
+  if(!t)continue;
+  const[dx,dy]=del(e,t),ux=dx/(td||1),uy=dy/(td||1);
+  const sp=e.kind==='drone'?Math.min(110+lvl*8,220):130;
+  let tvx,tvy;
+  if(e.kind==='drone'){tvx=ux*sp;tvy=uy*sp}
+  else if(td>430){tvx=ux*sp;tvy=uy*sp}
+  else if(td<280){tvx=-ux*sp;tvy=-uy*sp}
+  else{tvx=-uy*sp*e.dir;tvy=ux*sp*e.dir}
+  const k=Math.min(1,2*dt);e.vx+=(tvx-e.vx)*k;e.vy+=(tvy-e.vy)*k;
+  e.x+=e.vx*dt;e.y+=e.vy*dt;
+  if(mapMode==='box'){e.x=clamp(e.x,e.r,W-e.r);e.y=clamp(e.y,e.r,H-e.r)}
+  else if(mapMode==='wrap'){e.x=(e.x+W)%W;e.y=(e.y+H)%H}
+  if(e.kind==='drone'){
+   if(td<e.r+R&&e.cd<=0){hurt(t,10);e.cd=.8;t.vx+=ux*140;t.vy+=uy*140;boom(t.x,t.y,'#f55',8,150)}
+  }else if(e.cd<=0&&td<800){
+   const a=Math.atan2(dy,dx)+(Math.random()-.5)*.12;
+   proj.push({x:e.x,y:e.y,vx:Math.cos(a)*340,vy:Math.sin(a)*340,a,sp:340,dmg:8,r:5,life:3,t:0,type:'foe',o:2,col:'#f64'});
+   e.cd=1.6+Math.random()*.6;
+  }
+ }
+ for(const it of items){if(it.got)continue;for(const q of al){const[ix,iy]=del(q,it);if(Math.hypot(ix,iy)<R+14){it.got=1;boom(it.x,it.y,'#ff6',16,200);break}}}
+ if(!levelDone&&!coopOver&&enemies.every(e=>e.dead)&&items.every(it=>it.got)){levelDone=1;roundEnd=2.4;msg='Level '+lvl+' complete!'}
+}
 function step(dt){
  for(const s of ships){
-  if(s.dead)continue;
-  const k=binds[s.i],d=c=>keys[k[c]]?1:0,en=ships[1-s.i];
-  // rotation with inertia
+  if(s.dead){if(gm==='coop'&&!coopOver){s.rt-=dt;if(s.rt<=0)respawn(s)}continue}
+  const k=binds[s.i],d=c=>keys[k[c]]?1:0,fl=foes(s.i);
   s.w+=(d('right')-d('left'))*5*dt;s.w*=Math.exp(-2.2*dt);s.a+=s.w*dt;
   const fx=Math.cos(s.a),fy=Math.sin(s.a);
   s.thr=d('up');
   if(s.thr){s.vx+=fx*215*dt;s.vy+=fy*215*dt}
-  // slight sideways grip, natural drag
-  const fw=s.vx*fx+s.vy*fy,lt=-s.vx*fy+s.vy*fx,l2=lt*Math.exp(-.5*dt);
+  const fw=s.vx*fx+s.vy*fy,lat=-s.vx*fy+s.vy*fx,l2=lat*Math.exp(-.5*dt);
   s.vx=fx*fw-fy*l2;s.vy=fy*fw+fx*l2;
   const f=Math.exp(-.6*dt);s.vx*=f;s.vy*=f;
   if(d('down')){const sp=Math.hypot(s.vx,s.vy),ns=Math.max(0,sp-650*dt);if(sp>0){s.vx*=ns/sp;s.vy*=ns/sp}}
   s.x+=s.vx*dt;s.y+=s.vy*dt;
   if(mapMode==='box'){
-  if(s.x<R){s.x=R;s.vx=Math.abs(s.vx)*.5}if(s.x>W-R){s.x=W-R;s.vx=-Math.abs(s.vx)*.5}
-  if(s.y<R){s.y=R;s.vy=Math.abs(s.vy)*.5}if(s.y>H-R){s.y=H-R;s.vy=-Math.abs(s.vy)*.5}
+   if(s.x<R){s.x=R;s.vx=Math.abs(s.vx)*.5}if(s.x>W-R){s.x=W-R;s.vx=-Math.abs(s.vx)*.5}
+   if(s.y<R){s.y=R;s.vy=Math.abs(s.vy)*.5}if(s.y>H-R){s.y=H-R;s.vy=-Math.abs(s.vy)*.5}
   }else if(mapMode==='wrap'){s.x=(s.x+W)%W;s.y=(s.y+H)%H}
   for(const o of obs){
    const cx=clamp(s.x,o.x,o.x+o.w),cy=clamp(s.y,o.y,o.y+o.h);let dx=s.x-cx,dy=s.y-cy,dd=Math.hypot(dx,dy);
    if(dd<R){if(dd<.01){dx=0;dy=-1;dd=1}const nx=dx/dd,ny=dy/dd;s.x=cx+nx*R;s.y=cy+ny*R;
     const vn=s.vx*nx+s.vy*ny;if(vn<0){s.vx-=1.5*vn*nx;s.vy-=1.5*vn*ny}}
+  }
+  if(gm==='coop')for(const e of enemies){
+   if(e.kind!=='block'||e.dead)continue;
+   const[bx,by]=del(e,s),bd=Math.hypot(bx,by);
+   if(bd<e.r+R&&bd>0){const ux=bx/bd,uy=by/bd;s.x+=ux*(e.r+R-bd);s.y+=uy*(e.r+R-bd);const vn=s.vx*ux+s.vy*uy;if(vn<0){s.vx-=1.5*vn*ux;s.vy-=1.5*vn*uy}}
   }
   s.flash=Math.max(0,s.flash-dt);
   // primary gun with charge bar
@@ -174,18 +244,22 @@ function step(dt){
   const sk=d('sec'),edge=sk&&!s.prev;s.prev=sk;s.sc=Math.max(0,s.sc-dt);
   const nx=s.x+fx*24,ny=s.y+fy*24;
   if(s.sec==='lock'){
-   const[dx,dy]=del(s,en),dist=Math.hypot(dx,dy);
-   if(!en.dead&&dist<850&&Math.abs(angd(s.a,Math.atan2(dy,dx)))<.4)s.lockT=Math.min(1,s.lockT+dt);else s.lockT=Math.max(0,s.lockT-2*dt);
-   if(edge&&s.sc<=0&&s.lockT>=1&&!en.dead){P(s,nx,ny,s.a,560,30,6,6,'lock',{tg:en});s.sc=4;s.lockT=0}
+   let bt=null,ba=.4;
+   for(const e of fl){const[dx,dy]=del(s,e);if(Math.hypot(dx,dy)<850){const q=Math.abs(angd(s.a,Math.atan2(dy,dx)));if(q<ba){ba=q;bt=e}}}
+   if(bt){if(bt!==s.lt){s.lt=bt;s.lockT=0}s.lockT=Math.min(1,s.lockT+dt)}else s.lockT=Math.max(0,s.lockT-2*dt);
+   if(s.lt&&s.lt.dead){s.lt=null;s.lockT=0}
+   if(edge&&s.sc<=0&&s.lockT>=1&&s.lt){P(s,nx,ny,s.a,560,30,6,6,'lock',{tg:s.lt});s.sc=4;s.lockT=0}
   }else if(s.sec==='tracer'){
-   if(edge&&s.sc<=0){P(s,nx,ny,s.a,620,24,6,3,'tracer',{tg:en});s.sc=2.4}
+   if(edge&&s.sc<=0){let bt=null,ba=9;
+    for(const e of fl){const[dx,dy]=del(s,e),q=Math.abs(angd(s.a,Math.atan2(dy,dx)))+Math.hypot(dx,dy)/4000;if(q<ba){ba=q;bt=e}}
+    P(s,nx,ny,s.a,620,24,6,3,'tracer',{tg:bt});s.sc=2.4}
   }else if(s.sec==='spray'){
    if(edge&&s.sc<=0){for(let i=0;i<11;i++){const a=s.a+(i-5)*.06+(Math.random()-.5)*.04;P(s,nx,ny,a,620+Math.random()*120,7,3.5,.65,'pellet')}s.sc=1.4}
   }else if(s.sec==='laser'){
    if(edge&&s.sc<=0){s.las=2;s.sc=7}
-   if(s.las>0){s.las-=dt;
-    if(!en.dead){const[ex,ey]=del({x:nx,y:ny},en),t=ex*fx+ey*fy,perp=Math.abs(-ex*fy+ey*fx);
-     if(t>0&&t<beamLen(nx,ny,fx,fy)&&perp<R+5)hurt(en,36*dt)}}
+   if(s.las>0){s.las-=dt;const bl=beamLen(nx,ny,fx,fy);
+    for(const e of targets(s.i)){const[ex,ey]=del({x:nx,y:ny},e),t=ex*fx+ey*fy,perp=Math.abs(-ex*fy+ey*fx);
+     if(t>0&&t<bl&&perp<(e.r||R)+5)dmg(e,36*dt)}}
   }else if(s.sec==='power'){
    if(sk&&s.sc<=0)s.ch=Math.min(1.5,s.ch+dt);
    else if(s.ch>0){if(s.ch>.25){const q=s.ch/1.5;P(s,nx,ny,s.a,480,15+40*q,9+15*q,2.2,'power');s.sc=3}s.ch=0}
@@ -196,6 +270,7 @@ function step(dt){
  if(!a.dead&&!b.dead){const[dx,dy]=del(a,b),dd=Math.hypot(dx,dy);
   if(dd<R*2&&dd>0){const nx=dx/dd,ny=dy/dd,ov=R*2-dd;a.x-=nx*ov/2;a.y-=ny*ov/2;b.x+=nx*ov/2;b.y+=ny*ov/2;
    const rv=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;if(rv<0){a.vx+=nx*rv;a.vy+=ny*rv;b.vx-=nx*rv;b.vy-=ny*rv}}}
+ if(gm==='coop')stepEnemies(dt);
  // projectiles
  for(const p of proj){
   p.t+=dt;p.life-=dt;
@@ -208,21 +283,28 @@ function step(dt){
     parts.push({x:p.x,y:p.y,vx:0,vy:0,life:.25,col:'#f66'});
    }
   }
-  if(p.type==='tracer'&&!p.tg.dead){const[wx,wy]=del(p,p.tg);p.a+=clamp(angd(p.a,Math.atan2(wy,wx)),-2.6*dt,2.6*dt);p.vx=Math.cos(p.a)*p.sp;p.vy=Math.sin(p.a)*p.sp}
+  if(p.type==='tracer'){
+   if(!p.tg||p.tg.dead)p.tg=nearest(p.o,p.x,p.y);
+   if(p.tg){const[wx,wy]=del(p,p.tg);p.a+=clamp(angd(p.a,Math.atan2(wy,wx)),-2.6*dt,2.6*dt);p.vx=Math.cos(p.a)*p.sp;p.vy=Math.sin(p.a)*p.sp}
+  }
   p.x+=p.vx*dt;p.y+=p.vy*dt;
   if(p.type==='tracer'||p.type==='power')parts.push({x:p.x,y:p.y,vx:0,vy:0,life:.2,col:p.col});
   if(mapMode==='box'){if(p.x<0||p.x>W||p.y<0||p.y>H)p.life=0}else if(mapMode==='wrap'){p.x=(p.x+W)%W;p.y=(p.y+H)%H}
-  if(p.type==='gun'||!over)for(const o of obs)if(p.x>o.x-p.r&&p.x<o.x+o.w+p.r&&p.y>o.y-p.r&&p.y<o.y+o.h+p.r){p.life=0;boom(p.x,p.y,p.col,5,120)}
-  const en=ships[1-p.o];
-  if(p.life>0&&!en.dead&&Math.hypot(...del(p,en))<R+p.r){
-   hurt(en,p.dmg);const big=p.type==='lock'||p.type==='tracer'||p.type==='power';
-   boom(p.x,p.y,p.col,big?25:6,big?300:140);
-   if(big){en.vx+=p.vx*.15;en.vy+=p.vy*.15}p.life=0}
+  if(p.type==='gun'||p.type==='foe'||!over)for(const o of obs)if(p.x>o.x-p.r&&p.x<o.x+o.w+p.r&&p.y>o.y-p.r&&p.y<o.y+o.h+p.r){p.life=0;boom(p.x,p.y,p.col,5,120)}
+  if(p.life>0)for(const e of targets(p.o)){
+   if(Math.hypot(...del(p,e))<(e.r||R)+p.r){
+    dmg(e,p.dmg);const big=p.type==='lock'||p.type==='tracer'||p.type==='power';
+    boom(p.x,p.y,p.col,big?25:6,big?300:140);
+    if(big&&!e.kind){e.vx+=p.vx*.15;e.vy+=p.vy*.15}
+    p.life=0;break}
+  }
  }
  proj=proj.filter(p=>p.life>0);
  for(const q of parts){q.life-=dt;q.x+=q.vx*dt;q.y+=q.vy*dt}
  parts=parts.filter(q=>q.life>0);
- if(roundEnd>0){roundEnd-=dt;if(roundEnd<=0){if(Math.max(...wins)>=3){state='menu';$('menu').classList.remove('hide')}else startRound()}}
+ if(roundEnd>0){roundEnd-=dt;if(roundEnd<=0){
+  if(gm==='coop'){if(coopOver){state='menu';$('menu').classList.remove('hide')}else nextLevel()}
+  else if(Math.max(...wins)>=3){state='menu';$('menu').classList.remove('hide')}else startRound()}}
 }
 
 /* ---------- drawing ---------- */
@@ -239,14 +321,13 @@ function drawShip(s){
  if(s.sec==='power'&&s.ch>0){g.strokeStyle='#fff';g.shadowColor=COL[s.i];g.shadowBlur=14;g.beginPath();g.arc(nx,ny,6+s.ch/1.5*18,0,6.28);g.stroke();g.shadowBlur=0}
  if(s.las>0){const bl=beamLen(nx,ny,fx,fy);g.save();g.strokeStyle='#f4f';g.shadowColor='#f4f';g.shadowBlur=25;g.lineWidth=7+Math.random()*3;
   g.beginPath();g.moveTo(nx,ny);g.lineTo(nx+fx*bl,ny+fy*bl);g.stroke();g.strokeStyle='#fff';g.lineWidth=2;g.stroke();g.restore()}
- if(s.sec==='lock'&&s.lockT>0){const en=ships[1-s.i];if(!en.dead){const L=s.lockT>=1;g.strokeStyle=L?'#f33':'#ff6';g.lineWidth=2;
-  g.beginPath();g.arc(en.x,en.y,24+(1-s.lockT)*40,0,6.28);g.stroke();if(L){g.strokeRect(en.x-30,en.y-30,60,60)}}}
+ if(s.sec==='lock'&&s.lockT>0&&s.lt&&!s.lt.dead){const en=s.lt,L=s.lockT>=1;g.strokeStyle=L?'#f33':'#ff6';g.lineWidth=2;g.beginPath();g.arc(en.x,en.y,(en.r||R)+6+(1-s.lockT)*40,0,6.28);g.stroke();if(L)g.strokeRect(en.x-30,en.y-30,60,60)}
 }
 function bar(x,y,w,h,v,col,lab){g.fillStyle='#0b1226';g.fillRect(x,y,w,h);g.fillStyle=col;g.fillRect(x,y,w*clamp(v,0,1),h);
  g.strokeStyle='#345';g.strokeRect(x,y,w,h);g.fillStyle='#cde';g.font='11px system-ui';g.textAlign='left';g.fillText(lab,x+4,y+h-3)}
 function hud(s,x){
- g.fillStyle=COL[s.i];g.font='bold 14px system-ui';g.textAlign='left';g.fillText(`PLAYER ${s.i+1}   wins: ${wins[s.i]}`,x,18);
- bar(x,24,220,14,s.hp/100,'#3d6','HEALTH');
+ g.fillStyle=COL[s.i];g.font='bold 14px system-ui';g.textAlign='left';g.fillText(`PLAYER ${s.i+1}`+(gm==='coop'?'':`   wins: ${wins[s.i]}`),x,18);
+ bar(x,24,220,14,s.hp/100,'#3d6',s.dead&&gm==='coop'?'RESPAWN IN '+Math.ceil(s.rt)+'s':'HEALTH');
  bar(x,42,220,12,s.c/100,s.oh?'#e33':'#fc3',s.oh?'OVERHEATED (3/s)':'GUN');
  let v=1-s.sc/({lock:4,tracer:2.2,spray:1.6,laser:7,power:3}[s.sec]),t=SEC[s.sec][0];
  if(s.sec==='lock')t+=s.lockT>=1?' - LOCKED':' - '+Math.round(s.lockT*100)+'%';
@@ -257,6 +338,14 @@ let cam={x:W/2,y:H/2,s:.6,init:0};
 function drawWorld(){
  for(const o of obs){g.fillStyle='#14264a';g.strokeStyle='#4af';g.lineWidth=2;g.shadowColor='#4af';g.shadowBlur=10;g.fillRect(o.x,o.y,o.w,o.h);g.strokeRect(o.x,o.y,o.w,o.h);g.shadowBlur=0}
  for(const q of parts){g.globalAlpha=clamp(q.life*2.5,0,1);g.fillStyle=q.col;g.fillRect(q.x-2,q.y-2,4,4)}g.globalAlpha=1;
+ for(const it of items)if(!it.got){g.save();g.translate(it.x,it.y);g.rotate(performance.now()/500);g.fillStyle='#ff6';g.shadowColor='#ff6';g.shadowBlur=14;g.fillRect(-7,-7,14,14);g.restore()}
+ for(const e of enemies){if(e.dead)continue;g.save();g.translate(e.x,e.y);
+  const c=e.flash>0?'#fff':e.kind==='block'?'#8cf':e.kind==='drone'?'#f55':'#fa3';
+  g.shadowBlur=12;g.shadowColor=c;g.fillStyle=e.kind==='block'?'#16305a':'#2a0f14';g.strokeStyle=c;g.lineWidth=3;g.rotate(e.a);
+  const n=e.kind==='block'?6:8;g.beginPath();for(let i=0;i<n;i++){const a=i/n*6.283,rr=e.kind==='drone'&&i%2?e.r*.45:e.r;g.lineTo(Math.cos(a)*rr,Math.sin(a)*rr)}g.closePath();g.fill();g.stroke();
+  if(e.kind==='shooter'){g.fillStyle=c;g.beginPath();g.arc(0,0,5,0,6.28);g.fill()}
+  g.restore();g.shadowBlur=0;
+  if(e.hp<e.mhp){g.fillStyle='#300';g.fillRect(e.x-e.r,e.y-e.r-10,e.r*2,4);g.fillStyle=c;g.fillRect(e.x-e.r,e.y-e.r-10,e.r*2*e.hp/e.mhp,4)}}
  for(const p of proj){g.fillStyle=p.type==='lock'?'#f66':p.col;g.shadowColor=g.fillStyle;g.shadowBlur=10;g.beginPath();
   if(p.type==='lock'||p.type==='tracer'){g.save();g.translate(p.x,p.y);g.rotate(Math.atan2(p.vy,p.vx));g.fillRect(-8,-3,16,6);g.restore()}
   else{g.arc(p.x,p.y,p.r,0,6.28);g.fill()}}
@@ -296,6 +385,7 @@ function draw(){
  g.restore();
  hud(ships[0],12);hud(ships[1],cw-232);
  g.textAlign='center';g.fillStyle='#89a';g.font='12px system-ui';g.fillText('Esc = pause',cw/2,18);
+ if(gm==='coop'){const lf=enemies.filter(e=>!e.dead),n=k=>lf.filter(e=>e.kind===k).length;g.fillStyle='#cde';g.font='13px system-ui';g.fillText(`Level ${lvl}  |  targets ${n('block')}  drones ${n('drone')}  shooters ${n('shooter')}  items ${items.filter(i=>i.got).length}/${items.length}`,cw/2,38)}
  if(msg){g.fillStyle='#fff';g.font='bold 34px system-ui';g.shadowColor='#0ff';g.shadowBlur=20;g.fillText(msg,cw/2,top+vh/2);g.shadowBlur=0}
  if(paused){g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,0,cw,ch);g.fillStyle='#fff';g.font='bold 40px system-ui';g.fillText('PAUSED - press Esc',cw/2,ch/2)}
 }
