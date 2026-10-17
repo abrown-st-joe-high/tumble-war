@@ -37,7 +37,7 @@ label{cursor:pointer}
 <div><b class="p1">Player 1</b><select id="w0"></select><div class="desc" id="d0"></div></div>
 <div><b class="p2">Player 2</b><select id="w1"></select><div class="desc" id="d1"></div></div>
 </div>
-<h3>Map</h3><select id="map"><option value="arena">Arena (pillars, box edges)</option><option value="open">Open Box (empty, box edges)</option><option value="wrap">Wraparound (open, edges loop)</option><option value="space">Deep Space (open, zooming camera)</option><option value="planet">Planet Base (hills, jumping)</option></select>
+<h3>Map</h3><select id="map"><option value="arena">Arena (pillars, box edges)</option><option value="open">Open Box (empty, box edges)</option><option value="wrap">Wraparound (open, edges loop)</option><option value="space">Deep Space (open, zooming camera)</option><option value="planet">Planet Base (hills, jumping)</option><option value="planetwrap">Planet Wraparound (hills, edges loop)</option><option value="planetspace">Large Planet (hills, zooming camera)</option></select>
 <div id="hint"><small></small></div>
 <button class="go" id="start">Start Training</button>
 <button id="optb">Options / Controls</button>
@@ -47,7 +47,7 @@ label{cursor:pointer}
 <h1>OPTIONS</h1><small>Click a key, then press the new key. Esc cancels.</small>
 <div class="row"><div><h3 class="p1">Player 1</h3><table id="t0"></table></div>
 <div><h3 class="p2">Player 2</h3><table id="t1"></table></div></div>
-<h3>Gameplay</h3><label><input type="checkbox" id="over"> Secondary shots fly over obstacles</label><br><small>Off = every secondary shot (lock missiles and the laser too) is stopped by obstacles. Only matters on the Arena map.</small><br><label><input type="checkbox" id="ff"> Friendly fire in co-op (your shots can hurt your partner)</label>
+<h3>Gameplay</h3><label><input type="checkbox" id="over"> Secondary shots fly over obstacles</label><br><small>Off = every secondary shot (lock missiles and the laser too) is stopped by obstacles. Only matters on the Arena map.</small><br><label><input type="checkbox" id="ff"> Friendly fire in co-op (your shots can hurt your partner)</label><br><label>Wraparound map boundary: <select id="wl"><option value="dotted">Dotted line</option><option value="solid">Solid line</option><option value="none">No line (seamless, endless look)</option></select></label>
 <button id="reset">Reset to defaults</button>
 <button class="go" id="back">Back</button>
 </div></div>
@@ -75,8 +75,8 @@ const SEL=['lock','lock'];
 const OBS=[{x:740,y:440,w:120,h:120},{x:360,y:180,w:40,h:240},{x:360,y:580,w:40,h:240},{x:1200,y:180,w:40,h:240},{x:1200,y:580,w:40,h:240}];
 const COL=['#4ef','#fa4'];
 const HILLS=[[400,300,130,110],[1200,700,130,110],[350,750,110,90],[1250,250,110,90],[800,500,110,95],[700,150,90,60],[900,850,90,60],[560,540,70,50],[1040,460,70,50]];
-let terr=null;
-const MAPS={arena:{obs:OBS,mode:'box'},open:{obs:[],mode:'box'},wrap:{obs:[],mode:'wrap'},space:{obs:[],mode:'free'},planet:{obs:[],mode:'box',planet:1}};
+let terr=null,terrKey='';
+const MAPS={arena:{obs:OBS,mode:'box'},open:{obs:[],mode:'box'},wrap:{obs:[],mode:'wrap'},space:{obs:[],mode:'free'},planet:{obs:[],mode:'box',planet:1},planetwrap:{obs:[],mode:'wrap',planet:1},planetspace:{obs:[],mode:'free',planet:1}};
 
 /* ---------- menu / options ---------- */
 const $=id=>document.getElementById(id);
@@ -115,6 +115,9 @@ function syncMode(){$('coopopts').classList.toggle('hide2',gm!=='coop');$('start
 $('mode').value=gm;$('mode').onchange=()=>{gm=$('mode').value;try{localStorage.setItem('hoverMode',gm)}catch(e){}syncMode()};
 OBK.forEach(k=>{const c=$('ob_'+k);c.checked=!!ob[k];c.onchange=()=>{ob[k]=c.checked?1:0;try{localStorage.setItem('hoverOb',JSON.stringify(ob))}catch(e){}}});
 $('ff').checked=ff;$('ff').onchange=()=>{ff=$('ff').checked;try{localStorage.setItem('hoverFF',ff?'1':'0')}catch(e){}};
+let wl='dotted';try{wl=localStorage.getItem('hoverWL')||'dotted'}catch(e){}
+if(!['dotted','solid','none'].includes(wl))wl='dotted';
+$('wl').value=wl;$('wl').onchange=()=>{wl=$('wl').value;try{localStorage.setItem('hoverWL',wl)}catch(e){}};
 syncMode();
 hint();
 
@@ -135,7 +138,7 @@ addEventListener('blur',()=>{for(const k in keys)keys[k]=0});
 /* ---------- state ---------- */
 let planet=0,enemies=[],items=[],lvl=1,coopOver=0,levelDone=0,obs=[],mapMode='box',state='menu',paused=false,ships=[],proj=[],parts=[],wins=[0,0],msg='',msgT=0,roundEnd=0;
 function mkShip(i){return{z:gh(i?W-180:180,H/2),vz:0,air:0,lt:null,rt:0,i,x:i?W-180:180,y:H/2,vx:0,vy:0,a:i?Math.PI:0,w:0,hp:100,c:100,oh:0,pcd:0,sec:SEL[i],sc:0,lockT:0,las:0,ch:0,prev:0,thr:0,flash:0,dead:0}}
-function newMatch(){wins=[0,0];lvl=1;coopOver=0;levelDone=0;if(gm==='coop'&&!OBK.some(k=>ob[k])){ob.blocks=1;$('ob_blocks').checked=true}obs=MAPS[mapSel].obs;mapMode=MAPS[mapSel].mode;planet=MAPS[mapSel].planet?1:0;if(planet&&!terr)buildTerrain();startRound();state='play';paused=false}
+function newMatch(){wins=[0,0];lvl=1;coopOver=0;levelDone=0;if(gm==='coop'&&!OBK.some(k=>ob[k])){ob.blocks=1;$('ob_blocks').checked=true}obs=MAPS[mapSel].obs;mapMode=MAPS[mapSel].mode;planet=MAPS[mapSel].planet?1:0;if(planet){const tk=mapMode==='box'?'b':'p';if(!terr||terrKey!==tk){buildTerrain();terrKey=tk}}startRound();state='play';paused=false}
 function startRound(){cam.init=0;ships=[mkShip(0),mkShip(1)];proj=[];parts=[];roundEnd=0;msg='';msgT=0;enemies=[];items=[];if(gm==='coop')spawnLevel()}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const angd=(a,b)=>{let d=b-a;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d};
@@ -156,17 +159,18 @@ function boom(x,y,col,n=12,sp=200){for(let i=0;i<n;i++){const a=Math.random()*6.
 function hurt(s,d){if(s.dead)return;s.hp-=d;s.flash=.08;if(s.hp<=0){s.hp=0;s.dead=1;boom(s.x,s.y,'#fff',50,400);boom(s.x,s.y,COL[s.i],40,300);if(gm==='coop'){s.rt=6;if(ships.every(q=>q.dead)&&!coopOver){coopOver=1;roundEnd=3;msg='GAME OVER - reached level '+lvl}}else if(!roundEnd){const w=1-s.i;wins[w]++;roundEnd=2.4;msg=wins[w]>=3?`PLAYER ${w+1} WINS THE MATCH!`:`Player ${w+1} wins the round`;msgT=1}}}
 
 /* ---------- simulation ---------- */
-function gh(x,y){if(!planet)return 0;let h=0;for(const q of HILLS){const dx=x-q[0],dy=y-q[1];h+=q[3]*Math.exp(-(dx*dx+dy*dy)/(2*q[2]*q[2]))}return h}
+function gh(x,y){if(!planet)return 0;let h=0;const per=mapMode==='wrap'||mapMode==='free';for(const q of HILLS){let dx=x-q[0],dy=y-q[1];if(per){dx=((dx+W/2)%W+W)%W-W/2;dy=((dy+H/2)%H+H)%H-H/2}h+=q[3]*Math.exp(-(dx*dx+dy*dy)/(2*q[2]*q[2]))}return h}
 function gg(x,y){return[(gh(x+4,y)-gh(x-4,y))/8,(gh(x,y+4)-gh(x,y-4))/8]}
 function buildTerrain(){
  const w=800,h=500,c=document.createElement('canvas');c.width=w;c.height=h;
  const x=c.getContext('2d'),im=x.createImageData(w,h),d=im.data,Hf=new Float32Array(w*h);
  for(let j=0;j<h;j++)for(let i=0;i<w;i++)Hf[j*w+i]=gh(i*2,j*2);
  for(let j=0;j<h;j++)for(let i=0;i<w;i++){
-  const i0=Math.max(0,i-1),i1=Math.min(w-1,i+1),j0=Math.max(0,j-1),j1=Math.min(h-1,j+1);
-  const gx=(Hf[j*w+i1]-Hf[j*w+i0])/((i1-i0)*2),gy=(Hf[j1*w+i]-Hf[j0*w+i])/((j1-j0)*2);
+  const per=mapMode!=='box',i0=per?(i-1+w)%w:Math.max(0,i-1),i1=per?(i+1)%w:Math.min(w-1,i+1),j0=per?(j-1+h)%h:Math.max(0,j-1),j1=per?(j+1)%h:Math.min(h-1,j+1);
+  const di=per?4:(i1-i0)*2,dj=per?4:(j1-j0)*2;
+  const gx=(Hf[j*w+i1]-Hf[j*w+i0])/di,gy=(Hf[j1*w+i]-Hf[j0*w+i])/dj;
   const hh=Hf[j*w+i],t=Math.min(1,hh/110),k=t*t*(3-2*t);
-  const nz=.5+.5*Math.sin(i*.05+Math.sin(j*.06)*2)*Math.cos(j*.045);
+  const TP=6.2832,nz=.5+.5*Math.sin(TP*6*i/w+Math.sin(TP*3*j/h)*2)*Math.cos(TP*4*j/h);
   let b=Math.max(.5,Math.min(1.35,.8+(gx+gy)*1.3));
   if(hh>3&&(hh/18)%1<.07)b*=.8;
   const m=(.9+.2*nz)*b,o=(j*w+i)*4;
@@ -395,19 +399,20 @@ function draw(){
  }else sc=Math.min(cw/W,vh/H);
  g.save();g.beginPath();g.rect(0,top,cw,vh);g.clip();
  g.translate(cw/2,top+vh/2);g.scale(sc,sc);g.translate(-cx,-cy);
+ const open=free||(wrap&&wl==='none');
  let x0=0,y0=0,x1=W,y1=H,st=50;
- if(free){x0=cx-cw/2/sc;x1=cx+cw/2/sc;y0=cy-vh/2/sc;y1=cy+vh/2/sc;st=sc<.3?200:sc<.55?100:50}
- if(planet&&terr)g.drawImage(terr,0,0,W,H);else{g.fillStyle='#08101f';g.fillRect(x0,y0,x1-x0,y1-y0)}
+ if(open){x0=cx-cw/2/sc;x1=cx+cw/2/sc;y0=cy-vh/2/sc;y1=cy+vh/2/sc;st=free?(sc<.3?200:sc<.55?100:50):50}
+ if(planet&&terr){if(open){for(let i=Math.floor(x0/W);i<=Math.floor(x1/W);i++)for(let j=Math.floor(y0/H);j<=Math.floor(y1/H);j++)g.drawImage(terr,i*W,j*H,W+1,H+1)}else g.drawImage(terr,0,0,W,H)}else{g.fillStyle='#08101f';g.fillRect(x0,y0,x1-x0,y1-y0)}
  if(!planet){g.strokeStyle='#12305a';g.lineWidth=1/sc;g.beginPath();
  for(let x=Math.floor(x0/st)*st;x<=x1;x+=st){g.moveTo(x,y0);g.lineTo(x,y1)}
  for(let y=Math.floor(y0/st)*st;y<=y1;y+=st){g.moveTo(x0,y);g.lineTo(x1,y)}
  g.stroke();}
  g.save();
- if(!free){g.beginPath();g.rect(0,0,W,H);g.clip()}
- const offs=wrap?[-1,0,1]:[0];
- for(const i of offs)for(const j of offs){g.save();g.translate(i*W,j*H);drawWorld();g.restore()}
+ if(!open){g.beginPath();g.rect(0,0,W,H);g.clip()}
+ const ri=wrap?(open?[Math.floor(x0/W),Math.floor(x1/W)]:[-1,1]):[0,0],rj=wrap?(open?[Math.floor(y0/H),Math.floor(y1/H)]:[-1,1]):[0,0];
+ for(let i=ri[0];i<=ri[1];i++)for(let j=rj[0];j<=rj[1];j++){g.save();g.translate(i*W,j*H);drawWorld();g.restore()}
  g.restore();
- if(!free){g.strokeStyle=wrap?'#c6f':'#4af';g.lineWidth=4;if(wrap)g.setLineDash([16,12]);g.strokeRect(0,0,W,H);g.setLineDash([])}
+ if(!open){g.strokeStyle=wrap?'#c6f':'#4af';g.lineWidth=4;if(wrap&&wl==='dotted')g.setLineDash([16,12]);g.strokeRect(0,0,W,H);g.setLineDash([])}
  g.restore();
  hud(ships[0],12);hud(ships[1],cw-232);
  g.textAlign='center';g.fillStyle='#89a';g.font='12px system-ui';g.fillText('Esc = pause',cw/2,18);
